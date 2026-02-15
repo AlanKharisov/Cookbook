@@ -15,9 +15,10 @@ try {
   process.exit(1);
 }
 
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://notebook-66f4e-default-rtdb.firebaseio.com'
+  credential: admin.credential.cert(serviceAccount)
 });
 
 const app = express();
