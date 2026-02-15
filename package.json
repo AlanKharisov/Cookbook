@@ -2,8 +2,9 @@
   "name": "cookbook-app",
   "version": "1.0.0",
   "scripts": {
-    "start-backend": "node backend/server.js",
-    "start-ai-proxy": "node ai-proxy/index.js"
+  "start": "node backend/server.js",
+  "start-backend": "node backend/server.js",
+  "start-ai-proxy": "node ai-proxy/index.js"
   },
   "dependencies": {
     "express": "^4.18.2",
