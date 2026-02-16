@@ -57,39 +57,10 @@ try {
 const app = express();
 const db = admin.database();
 
-// ========== НАЛАШТУВАННЯ CORS ==========
-const allowedOrigins = [
-  'capacitor://localhost',
-  'http://localhost',
-  'http://localhost:3000',
-  'http://localhost:4500',
-  'http://localhost:4501',
-  'http://localhost:5173',
-  'http://192.168.18.11:4500',
-  'http://192.168.18.11:4501',
-  'http://192.168.18.11:5173'
-];
-
-// Додаємо фронтенд URL з змінних середовища, якщо він є
-if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
-  console.log('🌐 Frontend URL added to CORS:', process.env.FRONTEND_URL);
-}
-
+// ========== НАЛАШТУВАННЯ CORS (ТИМЧАСОВО ДЛЯ ТЕСТУ) ==========
 app.use(cors({
-  origin: function(origin, callback) {
-    // Дозволяємо запити без origin (наприклад, з мобільних додатків)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1 || isProduction) {
-      // В production дозволяємо всі origin з FRONTEND_URL
-      callback(null, true);
-    } else {
-      console.log('🚫 Blocked by CORS:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
+  origin: '*',  // ДОЗВОЛЯЄ ВСІ ДОМЕНИ!
+  credentials: false,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
