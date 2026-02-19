@@ -43,7 +43,6 @@ if (isProduction) {
 }
 
 // ========== ФОРМУЄМО ПРАВИЛЬНИЙ DATABASE URL ==========
-// Використовуємо projectId з сервісного акаунта
 const databaseURL = `https://${serviceAccount.project_id}-default-rtdb.firebaseio.com`;
 
 // Ініціалізація Firebase Admin
@@ -77,16 +76,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] ${req.method} ${req.url}`);
-  
-  // Логуємо заголовки для діагностики (тільки в розробці)
-  if (!isProduction) {
-    console.log('Headers:', req.headers.authorization ? 'Has Authorization' : 'No Authorization');
-  }
-  
   next();
 });
 
-// ========== ГОЛОВНИЙ МАРШРУТ (ТЕПЕР ПРАЦЮЄ!) ==========
+// ========== ГОЛОВНИЙ МАРШРУТ ==========
 app.get('/', (req, res) => {
   res.json({
     name: '🍳 Cookbook API',
@@ -95,15 +88,18 @@ app.get('/', (req, res) => {
     message: 'API is working!',
     environment: isProduction ? 'production' : 'development',
     projectId: serviceAccount.project_id,
+    databaseURL: databaseURL,
     timestamp: new Date().toISOString(),
     endpoints: {
       root: 'GET / - цей список',
       health: 'GET /api/health - перевірка статусу',
+      test: 'GET /api/test - перевірка доступу до БД (потрібен токен)',
       auth: 'POST /api/auth/verify - перевірка токена',
       categories: 'GET /api/categories - всі категорії',
       createCategory: 'POST /api/categories - створити категорію',
       dishes: 'GET /api/categories/:catId/dishes - страви категорії',
       createDish: 'POST /api/categories/:catId/dishes - додати страву',
+      sampleData: 'POST /api/sample-data - створити тестові дані',
       debug: 'GET /api/debug - діагностика'
     },
     docs: 'Використовуйте Authorization: Bearer <firebase-token> для захищених маршрутів'
@@ -161,13 +157,48 @@ const authenticate = async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid token format' });
     } else if (error.code === 'auth/id-token-expired') {
       return res.status(401).json({ error: 'Token expired' });
-    } else if (error.code === 'auth/uid-already-exists') {
-      return res.status(403).json({ error: 'Invalid token' });
     } else {
       return res.status(403).json({ error: 'Invalid token: ' + error.message });
     }
   }
 };
+
+// ========== ТЕСТОВИЙ МАРШРУТ З ПЕРЕВІРКОЮ БАЗИ ==========
+app.get('/api/test', authenticate, async (req, res) => {
+  try {
+    console.log('🧪 Testing database access for user:', req.user.uid);
+    
+    // Перевіряємо чи існує шлях users/${uid}
+    const userRef = db.ref(`users/${req.user.uid}`);
+    const snapshot = await userRef.once('value');
+    
+    // Перевіряємо чи можна створити тестову категорію
+    const testId = 'test_' + Date.now();
+    const testRef = db.ref(`users/${req.user.uid}/_test_`);
+    
+    let canWrite = true;
+    try {
+      await testRef.set({ timestamp: Date.now() });
+      await testRef.remove();
+    } catch (writeError) {
+      canWrite = false;
+      console.error('Write test failed:', writeError.message);
+    }
+    
+    res.json({
+      uid: req.user.uid,
+      authenticated: true,
+      hasData: snapshot.exists(),
+      canWrite: canWrite,
+      data: snapshot.val() || null,
+      databaseURL: databaseURL,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Test error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ========== АУТЕНТИФІКАЦІЯ ==========
 app.post('/api/auth/verify', async (req, res) => {
@@ -198,6 +229,7 @@ app.post('/api/auth/verify', async (req, res) => {
 app.get('/api/categories', authenticate, async (req, res) => {
   try {
     console.log('📥 Fetching categories for user:', req.user.uid);
+    
     const snapshot = await db
       .ref(`users/${req.user.uid}/categories`)
       .once('value');
@@ -230,7 +262,7 @@ app.post('/api/categories', authenticate, async (req, res) => {
       .ref(`users/${req.user.uid}/categories/${catId}`)
       .set(categoryData);
     
-    console.log('✅ Category created:', catId, name.trim());
+    console.log('✅ Category created for user:', req.user.uid, 'ID:', catId);
     res.status(201).json({ 
       id: catId, 
       name: name.trim() 
@@ -255,7 +287,7 @@ app.put('/api/categories/:catId', authenticate, async (req, res) => {
       .ref(`users/${req.user.uid}/categories/${catId}/name`)
       .set(name.trim());
     
-    console.log('✅ Category updated:', catId, name.trim());
+    console.log('✅ Category updated:', catId);
     res.json({ id: catId, name: name.trim() });
   } catch (error) {
     console.error('Error updating category:', error.message);
@@ -320,7 +352,7 @@ app.post('/api/categories/:catId/dishes', authenticate, async (req, res) => {
       .ref(`users/${req.user.uid}/categories/${catId}/dishes/${dishId}`)
       .set(dishData);
     
-    console.log('✅ Dish created:', dishId, name.trim());
+    console.log('✅ Dish created:', dishId);
     res.status(201).json({ id: dishId, ...dishData });
   } catch (error) {
     console.error('Error creating dish:', error.message);
@@ -333,14 +365,12 @@ app.put('/api/categories/:catId/dishes/:dishId', authenticate, async (req, res) 
   const { catId, dishId } = req.params;
   const updates = req.body;
   
-  // Видаляємо заборонені поля
   delete updates.id;
   
   try {
     const dishRef = db
       .ref(`users/${req.user.uid}/categories/${catId}/dishes/${dishId}`);
     
-    // Перевіряємо чи існує страва
     const snapshot = await dishRef.once('value');
     if (!snapshot.exists()) {
       return res.status(404).json({ error: 'Dish not found' });
@@ -396,6 +426,59 @@ app.patch('/api/categories/:catId/dishes/:dishId/favorite', authenticate, async 
   }
 });
 
+// ========== ЗРАЗКОВІ ДАНІ ==========
+app.post('/api/sample-data', authenticate, async (req, res) => {
+  try {
+    const sampleCategories = {
+      salads: {
+        name: "Салати",
+        dishes: {
+          greek: {
+            name: "Грецький салат",
+            description: "Салат з сиром фета, огірками, помідорами та оливками",
+            favorite: true
+          },
+          caesar: {
+            name: "Цезар",
+            description: "Салат з куркою, сухариками та соусом цезар",
+            favorite: false
+          }
+        }
+      },
+      soups: {
+        name: "Супи",
+        dishes: {
+          borsh: {
+            name: "Борщ",
+            description: "Традиційний український борщ",
+            favorite: true
+          }
+        }
+      },
+      desserts: {
+        name: "Десерти",
+        dishes: {
+          napoleon: {
+            name: "Наполеон",
+            description: "Торт з листкового тіста з заварним кремом",
+            favorite: false
+          }
+        }
+      }
+    };
+    
+    await db
+      .ref(`users/${req.user.uid}/categories`)
+      .set(sampleCategories);
+    
+    console.log('✅ Sample data created for user:', req.user.uid);
+    res.json({ success: true, message: 'Sample data created' });
+  } catch (error) {
+    console.error('Error creating sample data:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== ОБРОБКА ПОМИЛОК 404 ==========
 app.use('*', (req, res) => {
   res.status(404).json({ 
@@ -419,15 +502,17 @@ app.listen(PORT, '0.0.0.0', () => {
   if (isProduction) {
     console.log(`🔗 Public URL: ${process.env.RENDER_EXTERNAL_URL || 'Not set'}`);
   }
-  console.log('✅ Available endpoints:');
+  console.log('\n✅ Available endpoints:');
   console.log('   • GET  /');
   console.log('   • GET  /api/health');
   console.log('   • GET  /api/debug');
+  console.log('   • GET  /api/test (потрібен токен)');
   console.log('   • POST /api/auth/verify');
   console.log('   • GET  /api/categories');
   console.log('   • POST /api/categories');
   console.log('   • GET  /api/categories/:catId/dishes');
   console.log('   • POST /api/categories/:catId/dishes');
+  console.log('   • POST /api/sample-data');
   console.log('='.repeat(50) + '\n');
 });
 
